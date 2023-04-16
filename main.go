@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,10 +14,10 @@ import (
 
 type KeyValueStore struct {
 	mu    sync.RWMutex
-	store map[string]Value
+	store map[string]Data
 }
 
-type Value struct {
+type Data struct {
 	Value      string
 	ExpiryTime *time.Time
 }
@@ -32,130 +33,11 @@ type Response struct {
 
 func NewKeyValueStore() *KeyValueStore {
 	return &KeyValueStore{
-		store: make(map[string]Value),
+		store: make(map[string]Data),
 	}
 }
 
-func (kv *KeyValueStore) Set(key string, value string, hasExpiry bool, expiryTime *time.Time, condition string) error {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	if condition == "NX" && kv.exists(key) {
-		return fmt.Errorf("key already exists")
-	} else if condition == "XX" && !kv.exists(key) {
-		return fmt.Errorf("key does not exist")
-	}
-
-	if hasExpiry {
-		kv.store[key] = Value{
-			Value:      value,
-			ExpiryTime: expiryTime,
-		}
-	} else {
-		kv.store[key] = Value{
-			Value: value,
-		}
-	}
-
-	return nil
-}
-
-func (kv *KeyValueStore) Get(key string) (string, error) {
-	kv.mu.RLock()
-	defer kv.mu.RUnlock()
-
-	value, ok := kv.store[key]
-	if !ok {
-		return "", fmt.Errorf("key not found")
-	}
-
-	return value.Value, nil
-}
-
-func (kv *KeyValueStore) QPush(key string, values []string) {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	value, ok := kv.store[key]
-	if !ok {
-		kv.store[key] = Value{
-			Value: strings.Join(values, " "),
-		}
-	} else {
-		value.Value += " " + strings.Join(values, " ")
-		kv.store[key] = value
-	}
-}
-
-func (kv *KeyValueStore) QPop(key string) (string, error) {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	value, ok := kv.store[key]
-	if !ok {
-		return "", fmt.Errorf("queue is empty")
-	}
-
-	values := strings.Split(value.Value, " ")
-	if len(values) == 0 {
-		return "", fmt.Errorf("queue is empty")
-	}
-
-	lastValue := values[len(values)-1]
-	values = values[:len(values)-1]
-	value.Value = strings.Join(values, " ")
-
-	if value.Value == "" {
-		delete(kv.store, key)
-	} else {
-		kv.store[key] = value
-	}
-
-	return lastValue, nil
-}
-
-func (kv *KeyValueStore) BQPop(key string, timeout *time.Duration) (string, error) {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-
-	value, ok := kv.store[key]
-	if !ok {
-		return "", fmt.Errorf("queue is empty")
-	}
-
-	values := strings.Split(value.Value, " ")
-	if len(values) == 0 {
-		return "", fmt.Errorf("queue is empty")
-	}
-
-	lastValue := values[len(values)-1]
-	values = values[:len(values)-1]
-	value.Value = strings.Join(values, " ")
-
-	if value.Value == "" {
-		delete(kv.store, key)
-	} else {
-		kv.store[key] = value
-	}
-
-	if timeout != nil {
-		select {
-		case <-time.After(*timeout):
-			return "", fmt.Errorf("timeout")
-		default:
-			// continue
-		}
-	}
-
-	return lastValue, nil
-}
-
-func (kv *KeyValueStore) exists(key string) bool {
-	_, ok := kv.store[key]
-	return ok
-}
-
-func handleSuccess(w http.ResponseWriter, data string) {
+func sendOKResp(w http.ResponseWriter, data string) {
 	w.Header().Set("Content-Type", "application/json")
 	response := Response{
 		Value: data,
@@ -164,134 +46,214 @@ func handleSuccess(w http.ResponseWriter, data string) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func handleError(w http.ResponseWriter, err string) {
+func sendErrRes(w http.ResponseWriter, status int, err string) {
 	w.Header().Set("Content-Type", "application/json")
 	response := Response{
 		Error: err,
 	}
-	w.WriteHeader(http.StatusBadRequest)
+	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(response)
 }
 
-func handledResponse(w http.ResponseWriter, data string, err error) {
-	w.Header().Set("Content-Type", "application/json")
+func (kv *KeyValueStore) Set(args []string) error {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
 
-	if err != nil {
-		response := Response{
-			Value: data,
-		}
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(response)
-	} else {
-		response := Response{
-			Error: err.Error(),
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(response)
+	if len(args) < 2 {
+		return fmt.Errorf("invalid command")
 	}
+	key := args[0]
+	value := args[1]
+	hasExpiry := false
+	expiry := time.Time{}
+	kv.removeExpiredKey(key)
+	index := 2
+
+	if index < len(args) && strings.ToUpper(args[index]) == "EX" {
+		index++
+		if index >= len(args) {
+			return fmt.Errorf("invalid command")
+		}
+		expirySec, err := strconv.Atoi(args[index])
+		if err != nil {
+			return fmt.Errorf("invalid command")
+		}
+		expiry = time.Now().Add(time.Duration(expirySec) * time.Second)
+		index++
+		hasExpiry = true
+	}
+
+	if index < len(args) {
+
+		if strings.ToUpper(args[index]) == "NX" && kv.exists(key) {
+			return fmt.Errorf("key already exists")
+		}
+
+		if strings.ToUpper(args[index]) == "XX" && !kv.exists(key) {
+			return fmt.Errorf("key does not exist")
+		}
+	}
+
+	if hasExpiry {
+		kv.store[key] = Data{
+			Value:      value,
+			ExpiryTime: &expiry,
+		}
+	} else {
+		kv.store[key] = Data{
+			Value: value,
+		}
+	}
+	return nil
 }
 
-func parseCommand(rawCmd string, r *http.Request) (string, []string, string, string, bool, *time.Time, string) {
-	cmd := strings.Split(rawCmd, " ")
-	command := ""
-	key := ""
-	value := ""
-	hasExpiry := false
-	expiryTime := time.Time{}
-	condition := ""
+func (kv *KeyValueStore) Get(args []string) (string, error) {
+	kv.mu.RLock()
+	defer kv.mu.RUnlock()
 
-	if len(cmd) >= 1 {
-		command = strings.ToUpper(cmd[0])
+	if len(args) != 1 {
+		return "", fmt.Errorf("invalid command")
 	}
-	if len(cmd) >= 2 {
-		key = cmd[1]
+
+	key := args[0]
+	kv.removeExpiredKey(key)
+	data, ok := kv.store[key]
+
+	if !ok {
+		return "", fmt.Errorf("key not found")
 	}
-	if len(cmd) >= 3 {
-		value = cmd[2]
+
+	return data.Value, nil
+}
+
+func (kv *KeyValueStore) QPush(args []string) error {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	if len(args) < 2 {
+		return fmt.Errorf("invalid command")
 	}
-	if len(cmd) >= 4 {
-		if strings.ToUpper(cmd[3]) == "EX" {
-			hasExpiry = true
+
+	key := args[0]
+	values := args[1:]
+
+	value, ok := kv.store[key]
+	if !ok {
+		kv.store[key] = Data{
+			Value: strings.Join(values, " "),
+		}
+	} else {
+		value.Value += " " + strings.Join(values, " ")
+		kv.store[key] = value
+	}
+
+	return nil
+}
+
+func (kv *KeyValueStore) QPop(args []string) (string, error) {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	if len(args) != 1 {
+		return "", fmt.Errorf("invalid command")
+	}
+	key := args[0]
+
+	value, ok := kv.store[key]
+	if !ok {
+		return "", fmt.Errorf("queue is empty")
+	}
+
+	values := strings.Split(value.Value, " ")
+	if len(values) == 0 {
+		return "", fmt.Errorf("queue is empty")
+	}
+
+	lastValue := values[len(values)-1]
+	values = values[:len(values)-1]
+	value.Value = strings.Join(values, " ")
+
+	if value.Value == "" {
+		delete(kv.store, key)
+	} else {
+		kv.store[key] = value
+	}
+	return lastValue, nil
+}
+
+func (kv *KeyValueStore) exists(key string) bool {
+	_, ok := kv.store[key]
+	return ok
+}
+
+func (kv *KeyValueStore) removeExpiredKey(key string) {
+	data, ok := kv.store[key]
+
+	if ok {
+		if data.ExpiryTime != nil && data.ExpiryTime.Before(time.Now()) {
+			delete(kv.store, key)
 		}
 	}
-	if len(cmd) >= 5 {
-		expiryTimeStr := cmd[4]
-		expiryTimeInt, _ := strconv.Atoi(expiryTimeStr)
-		expiryTime = time.Now().Add(time.Second * time.Duration(expiryTimeInt))
-	}
 
-	if len(cmd) >= 6 {
-		condition = strings.ToUpper(cmd[5])
-	}
-
-	return command, cmd[2:], key, value, hasExpiry, &expiryTime, condition
 }
 
 func handleCommand(kv *KeyValueStore, w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
+	if r.Method != http.MethodPost {
+		sendErrRes(w, http.StatusMethodNotAllowed, "invalid request")
+		return
+	}
+
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		handleError(w, err.Error())
+		sendErrRes(w, http.StatusUnprocessableEntity, "invalid request")
+		log.Fatal(err.Error())
 		return
 	}
 
-	var cmd Command
-	err = json.Unmarshal(body, &cmd)
+	var input Command
+	err = json.Unmarshal(body, &input)
 	if err != nil {
-		handleError(w, err.Error())
+		sendErrRes(w, http.StatusUnprocessableEntity, "invalid request")
+		log.Fatal(err.Error())
 		return
 	}
 
-	fmt.Println(cmd)
-
-	command, args, key, value, hasExpiry, expiryTime, condition := parseCommand(cmd.Command, r)
-	fmt.Println(args)
+	tokenizedCommand := strings.Split(input.Command, " ")
+	command := strings.ToUpper(tokenizedCommand[0])
+	args := tokenizedCommand[1:]
 
 	switch command {
 	case "SET":
-		err := kv.Set(key, value, hasExpiry, expiryTime, condition)
+		err := kv.Set(args)
 		if err != nil {
-			handleError(w, err.Error())
+			sendErrRes(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		handleSuccess(w, "OK")
 	case "GET":
-		result, err := kv.Get(key)
+		result, err := kv.Get(args)
 		if err != nil {
-			handleError(w, err.Error())
+			sendErrRes(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		handleSuccess(w, result)
+		sendOKResp(w, result)
 	case "QPUSH":
-		values := args
-		if len(values) == 0 {
-			handleError(w, "value not provided")
+		err := kv.QPush(args)
+		if err != nil {
+			sendErrRes(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		kv.QPush(key, values)
-		handleSuccess(w, "OK")
+		sendOKResp(w, "OK")
 	case "QPOP":
-		result, err := kv.QPop(key)
+		result, err := kv.QPop(args)
 		if err != nil {
-			handleError(w, err.Error())
+			sendErrRes(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		handleSuccess(w, result)
-	case "BQPOP":
-		timeout, err := time.ParseDuration(args[0])
-		if err != nil {
-			handleError(w, err.Error())
-		}
-
-		result, err := kv.BQPop(key, &timeout)
-		if err != nil {
-			handleError(w, err.Error())
-			return
-		}
-		handleSuccess(w, result)
+		sendOKResp(w, result)
 	default:
-		handleError(w, "Invalid command")
+		sendErrRes(w, http.StatusBadRequest, "invalid command")
 	}
 }
 
@@ -300,5 +262,5 @@ func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		handleCommand(kv, w, r)
 	})
-	http.ListenAndServe(":8000", nil)
+	http.ListenAndServe(":8080", nil)
 }
