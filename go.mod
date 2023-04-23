@@ -1,3 +1,3 @@
-module github.com/ahampriyanshu/gg.git
+module greedy-games
 
 go 1.20
