@@ -2,42 +2,19 @@ package utils
 
 import (
 	"encoding/json"
+	"greedy-games/dto"
+	"greedy-games/store"
+	"log"
 	"net/http"
-	"sync"
 	"time"
 )
 
-type KeyValueStore struct {
-	Mu    sync.RWMutex
-	Store map[string]Data
-}
-
-type Data struct {
-	Value      string
-	ExpiryTime *time.Time
-}
-
-type Command struct {
-	Command string `json:"command"`
-}
-
-type Response struct {
-	Value string `json:"value,omitempty"`
-	Error string `json:"error,omitempty"`
-}
-
-func NewKeyValueStore() *KeyValueStore {
-	return &KeyValueStore{
-		Store: make(map[string]Data),
-	}
-}
-
-func Exists(kv *KeyValueStore, key string) bool {
+func Exists(kv *store.KeyValueStore, key string) bool {
 	_, ok := kv.Store[key]
 	return ok
 }
 
-func RemoveExpiredKey(kv *KeyValueStore, key string) {
+func RemoveExpiredKey(kv *store.KeyValueStore, key string) {
 	data, ok := kv.Store[key]
 
 	if ok {
@@ -47,19 +24,16 @@ func RemoveExpiredKey(kv *KeyValueStore, key string) {
 	}
 }
 
-func SendOKResp(w http.ResponseWriter, data string) {
+func SendResponse(w http.ResponseWriter, status int, data string, err string) {
 	w.Header().Set("Content-Type", "application/json")
-	response := Response{
+	response := dto.Response{
 		Value: data,
-	}
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(response)
-}
-
-func SendErrRes(w http.ResponseWriter, status int, err string) {
-	w.Header().Set("Content-Type", "application/json")
-	response := Response{
 		Error: err,
+	}
+	if status >= 200 && status <= 299 {
+		log.Printf("[SUCCESS] HTTP request returned with %d", status)
+	} else {
+		log.Printf("[ERROR] HTTP request returned with %d", status)
 	}
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(response)
