@@ -1,10 +1,10 @@
 package main
 
 import (
-	"greedy-games/constants"
-	"greedy-games/cron"
-	"greedy-games/server"
-	"greedy-games/store"
+	"go-redis/constants"
+	"go-redis/cron"
+	"go-redis/server"
+	"go-redis/store"
 	"log"
 )
 
@@ -19,7 +19,7 @@ func main() {
 	log.Printf("Launching Server at port %s", constants.PORT)
 	kv := store.NewKeyValueStore()
 	cron.CleanUpJob(kv)
-	err := server.Lanuch(kv, constants.PORT)
+	err := server.Launch(kv, constants.PORT)
 	if err != nil {
 		log.Fatal("Server terminated!")
 	}

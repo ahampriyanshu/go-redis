@@ -3,11 +3,11 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
-	"greedy-games/constants"
-	"greedy-games/dto"
-	"greedy-games/store"
-	"greedy-games/utils"
-	"io/ioutil"
+	"go-redis/constants"
+	"go-redis/dto"
+	"go-redis/store"
+	"go-redis/utils"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -74,19 +74,30 @@ func Set(kv *store.KeyValueStore, args []string) error {
 
 // Returns the value for a given key in the store
 func Get(kv *store.KeyValueStore, args []string) (string, error) {
-	kv.Mu.RLock()
-	defer kv.Mu.RUnlock()
-
 	// GET command must have exactly one argument (the key)
 	if len(args) != 1 {
 		return "", fmt.Errorf(constants.INVALID_COMMAND)
 	}
 
 	key := args[0]
-	utils.RemoveExpiredKey(kv, key)
+	
+	// First, check if key exists and if it's expired (requires write lock if expired)
+	kv.Mu.RLock()
 	data, ok := kv.Store[key]
+	kv.Mu.RUnlock()
 
 	if !ok {
+		return "", fmt.Errorf(constants.XX_ERR)
+	}
+
+	// Check if expired and remove if necessary (upgrade to write lock)
+	if data.ExpiryTime != nil && data.ExpiryTime.Before(time.Now()) {
+		kv.Mu.Lock()
+		// Double-check that key still exists and is still expired
+		if data, ok := kv.Store[key]; ok && data.ExpiryTime != nil && data.ExpiryTime.Before(time.Now()) {
+			delete(kv.Store, key)
+		}
+		kv.Mu.Unlock()
 		return "", fmt.Errorf(constants.XX_ERR)
 	}
 
@@ -106,8 +117,6 @@ func QPush(kv *store.KeyValueStore, args []string) error {
 	values := args[1:]
 
 	queue, ok := kv.Queues[key]
-
-	fmt.Println(ok)
 
 	if !ok {
 		// If the queue doesn't exist, create a new channel
@@ -180,7 +189,7 @@ func HandleCommand(kv *store.KeyValueStore, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		utils.SendResponse(w, http.StatusUnprocessableEntity, "", constants.INVALID_REQUEST)
 		return

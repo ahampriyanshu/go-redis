@@ -1,12 +1,12 @@
 package server
 
 import (
-	"greedy-games/controller"
-	"greedy-games/store"
+	"go-redis/controller"
+	"go-redis/store"
 	"net/http"
 )
 
-func Lanuch(kv *store.KeyValueStore, port string) error {
+func Launch(kv *store.KeyValueStore, port string) error {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		controller.HandleCommand(kv, w, r)
 	})

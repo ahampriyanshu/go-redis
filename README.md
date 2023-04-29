@@ -1,12 +1,13 @@
-## In-memory key value database
+# Go Redis
+In-memory key value database in Go
 
-### Base URL
+## Base URL
 
-- [https://greedy-games.onrender.com](https://greedy-games.onrender.com)
+- [https://go-redis.onrender.com](https://go-redis.onrender.com)
 
-#### Saving a value with any conditions
+### Saving a value with any conditions
 
-##### Request
+#### Request
 
 ```
 POST /
@@ -14,7 +15,7 @@ POST /
 {"command": "SET a 5" }
 ```
 
-##### Response
+#### Response
 
 ```
 200 OK
@@ -32,7 +33,7 @@ POST /
 {"command": "GET a" }
 ```
 
-##### Response
+#### Response
 
 ```
 200 OK
@@ -50,7 +51,7 @@ POST /
 {"command": "GET abc" }
 ```
 
-##### Response
+#### Response
 
 ```
 400 Bad Request
@@ -60,9 +61,9 @@ POST /
 }
 ```
 
-#### Saving a value with expiry time
+### Saving a value with expiry time
 
-##### Request
+#### Request
 
 ```
 POST /
@@ -70,7 +71,7 @@ POST /
 {"command": "SET a 5 EX 20" }
 ```
 
-##### Response
+#### Response
 
 ```
 200 OK
@@ -87,7 +88,7 @@ POST /
 {"command": "GET a" }
 ```
 
-##### Response
+#### Response
 
 ```
 200 OK
@@ -105,7 +106,7 @@ POST /
 {"command": "GET a" }
 ```
 
-##### Response
+#### Response
 
 ```
 400 Bad Request
@@ -115,11 +116,11 @@ POST /
 }
 ```
 
-#### Saving a value with conditions
+### Saving a value with conditions
 
 Only set the key if it does not already exist.
 
-##### Request
+#### Request
 
 ```
 POST /
@@ -129,7 +130,7 @@ POST /
 
 - When key doesn't exists
 
-##### Response
+#### Response
 
 ```
 200 OK
@@ -141,7 +142,7 @@ POST /
 
 - When key does exists
 
-##### Response
+#### Response
 
 ```
 400 Bad Request
@@ -153,7 +154,7 @@ POST /
 
 Only set the key if it already exists.
 
-##### Request
+#### Request
 
 ```
 POST /
@@ -163,7 +164,7 @@ POST /
 
 - When key does exists
 
-##### Response
+#### Response
 
 ```
 200 OK
@@ -175,7 +176,7 @@ POST /
 
 - When key doesn't exists
 
-##### Response
+#### Response
 
 ```
 400 Bad Request
@@ -185,9 +186,9 @@ POST /
 }
 ```
 
-#### Push
+### Push
 
-##### Request
+#### Request
 
 ```
 POST /
@@ -197,7 +198,7 @@ POST /
 
 - When a new queue is created
 
-##### Response
+#### Response
 
 ```
 200 OK
@@ -209,7 +210,7 @@ POST /
 
 - Appends to the existing value
 
-##### Response
+#### Response
 
 ```
 200 OK
@@ -219,9 +220,9 @@ POST /
 }
 ```
 
-#### Pop
+### Pop
 
-##### Request
+#### Request
 
 ```
 POST /
@@ -231,7 +232,7 @@ POST /
 
 - When the queue is non-empty
 
-##### Response
+#### Response
 
 ```
 200 OK
@@ -243,7 +244,7 @@ POST /
 
 - When the queue is empty
 
-##### Response
+#### Response
 
 ```
 400 Bad Request
@@ -255,7 +256,7 @@ POST /
 
 - When the queue doesn't exists
 
-##### Response
+#### Response
 
 ```
 400 Bad Request
@@ -265,7 +266,7 @@ POST /
 }
 ```
 
-### Error Handling
+## Error Handling
 
 - Incorrect HTTP method/Endpoint
 
@@ -275,7 +276,7 @@ GET /
 {"command": "GET a" }
 ```
 
-##### Response
+### Response
 
 ```
 405 Method Not Allowed
@@ -293,7 +294,7 @@ POST /
 
 ```
 
-##### Response
+#### Response
 
 ```
 Status: 422 Unprocessable Entity
@@ -311,7 +312,7 @@ POST /
 {"command": "SET a"}
 ```
 
-##### Response
+#### Response
 
 ```
 400 Bad Request

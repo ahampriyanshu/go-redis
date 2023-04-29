@@ -2,8 +2,8 @@ package utils
 
 import (
 	"encoding/json"
-	"greedy-games/dto"
-	"greedy-games/store"
+	"go-redis/dto"
+	"go-redis/store"
 	"log"
 	"net/http"
 	"time"
